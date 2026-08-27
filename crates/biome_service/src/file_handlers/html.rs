@@ -57,7 +57,7 @@ use biome_formatter::{
 };
 use biome_fs::BiomePath;
 use biome_html_analyze::{HtmlAnalyzerServices, analyze};
-use biome_html_factory::make::ident;
+use biome_html_factory::make::{html_string_literal, html_string_literal_single_quotes, ident};
 use biome_html_formatter::context::SelfCloseVoidElements;
 use biome_html_formatter::{
     HtmlFormatOptions,
@@ -66,7 +66,7 @@ use biome_html_formatter::{
 };
 use biome_html_parser::{HtmlParserOptions, parse_html_with_cache};
 use biome_html_syntax::element_ext::{AnyEmbeddedContent, AnyHtmlTagElement};
-use biome_html_syntax::{HtmlAttribute, HtmlLanguage, HtmlRoot, HtmlSyntaxNode};
+use biome_html_syntax::{HtmlAttribute, HtmlLanguage, HtmlRoot, HtmlSyntaxNode, HtmlSyntaxToken};
 #[cfg(feature = "html_embeds")]
 use biome_js_parser::{JsParserOptions, parse as parse_js};
 #[cfg(feature = "html_embeds")]
@@ -1081,36 +1081,69 @@ pub(crate) fn update_snippets(
         };
         let snippet = new_snippets.swap_remove(snippet_index);
 
-        if let Some(value_token) = element.value_token() {
-            let new_token_text = if snippet.needs_reindent {
-                // The formatted code doesn't carry the host's nesting
-                // indentation. Re-apply it to every line so the embed
-                // lines up with its surroundings.
-                let old_text = value_token.text_trimmed();
-                let leading_trivia = read_leading_trivia(old_text);
-                let trailing_trivia = read_trailing_trivia(old_text);
-                let indent_prefix = content_indent_prefix(&leading_trivia);
-                let mut reconstructed = String::new();
-                reconstructed.push_str(&leading_trivia);
-                push_reindented_code(
-                    &mut reconstructed,
-                    snippet.new_code.trim(),
-                    indent_prefix,
-                    &snippet.verbatim_ranges,
-                );
-                reconstructed.push_str(&trailing_trivia);
-                reconstructed
-            } else {
-                snippet.new_code
-            };
+        let Some(value_token) = element.value_token() else {
+            continue;
+        };
 
-            mutation.replace_token(value_token, ident(&new_token_text));
+        let token_range = value_token.text_range();
+        let new_token_text = if snippet.needs_reindent {
+            // The formatted code doesn't carry the host's nesting
+            // indentation. Re-apply it to every line so the embed lines up
+            // with its surroundings. Slice by `content_range` rather than
+            // trimming the whole token, since content boundaries (e.g. a
+            // quoted attribute value, excluding the quotes) don't line up
+            // consistently with token trivia across embed shapes.
+            let old_text = &value_token.text()[snippet.content_range - token_range.start()];
+            let leading_trivia = read_leading_trivia(old_text);
+            let trailing_trivia = read_trailing_trivia(old_text);
+            let indent_prefix = content_indent_prefix(&leading_trivia);
+            let mut reconstructed = String::new();
+            reconstructed.push_str(&leading_trivia);
+            push_reindented_code(
+                &mut reconstructed,
+                snippet.new_code.trim(),
+                indent_prefix,
+                &snippet.verbatim_ranges,
+            );
+            reconstructed.push_str(&trailing_trivia);
+            reconstructed
+        } else {
+            snippet.new_code
+        };
+
+        let new_token = if element.is_quoted_value() {
+            quoted_attribute_token(&new_token_text)
+        } else {
+            ident(&new_token_text)
+        };
+
+        // Equal ranges mean the content covers the token's trivia too, so
+        // `new_token_text` already carries it and copying it over would
+        // duplicate it. An inner-span content (quoted value, Astro
+        // frontmatter) instead needs the surrounding trivia kept.
+        if snippet.content_range == token_range {
+            mutation.replace_token_discard_trivia(value_token, new_token);
+        } else {
+            mutation.replace_token(value_token, new_token);
         }
     }
 
     let root = mutation.commit();
 
     Ok(root.as_send().unwrap())
+}
+
+/// Wraps `text` as an attribute value. A fix can introduce quotes the source
+/// didn't have — the embedded formatter rewriting `foo('bar')` to `foo("bar")`,
+/// say — which would otherwise terminate the attribute early. Follows the same
+/// policy as the formatter's own requoting: delimit with the quote that needs
+/// the fewest escapes, and escape whatever is left as a character reference.
+fn quoted_attribute_token(text: &str) -> HtmlSyntaxToken {
+    if text.matches('"').count() > text.matches('\'').count() {
+        html_string_literal_single_quotes(&text.replace('\'', "&apos;"))
+    } else {
+        html_string_literal(&text.replace('"', "&quot;"))
+    }
 }
 
 /// Extracts all leading whitespace (spaces, tabs, newlines, carriage returns) from a string.

@@ -6,8 +6,8 @@ use crate::{
     AnyAstroDirective, AnyHtmlAttribute, AnyHtmlContent, AnyHtmlElement, AnyHtmlTagName,
     AnyHtmlTextExpression, AnySvelteBlock, AnyVueDirective, AstroEmbeddedContent,
     HtmlAttributeList, HtmlElement, HtmlEmbeddedContent, HtmlOpeningElement,
-    HtmlProcessingInstruction, HtmlSelfClosingElement, HtmlSyntaxToken, HtmlTagName, ScriptType,
-    inner_string_text,
+    HtmlProcessingInstruction, HtmlSelfClosingElement, HtmlString, HtmlSyntaxToken, HtmlTagName,
+    HtmlTextExpression, ScriptType, inner_string_text, is_quoted,
 };
 use biome_aria::Attribute;
 use biome_parser::{TokenSet, token_set};
@@ -670,7 +670,7 @@ impl biome_aria::Element for AnyHtmlTagElement {
 }
 
 declare_node_union! {
-    pub AnyEmbeddedContent = HtmlEmbeddedContent | AstroEmbeddedContent
+    pub AnyEmbeddedContent = HtmlEmbeddedContent | AstroEmbeddedContent | HtmlTextExpression | HtmlString
 }
 
 impl AnyEmbeddedContent {
@@ -678,7 +678,22 @@ impl AnyEmbeddedContent {
         match self {
             Self::HtmlEmbeddedContent(node) => node.value_token().ok(),
             Self::AstroEmbeddedContent(node) => node.content_token(),
+            Self::HtmlTextExpression(node) => node.html_literal_token().ok(),
+            Self::HtmlString(node) => node.value_token().ok(),
         }
+    }
+
+    /// Whether this variant's value is a quoted attribute string, whose
+    /// delimiters have to be re-created when the token is replaced.
+    ///
+    /// Only an [`HtmlString`] qualifies: a text expression may well hold a
+    /// quoted JS string such as `{{ "a" + b + "c" }}`, but those quotes
+    /// belong to the expression and must not be treated as delimiters.
+    pub fn is_quoted_value(&self) -> bool {
+        matches!(self, Self::HtmlString(_))
+            && self
+                .value_token()
+                .is_some_and(|token| is_quoted(token.text_trimmed()))
     }
 }
 

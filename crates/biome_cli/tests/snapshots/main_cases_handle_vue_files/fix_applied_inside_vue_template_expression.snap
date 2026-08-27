@@ -1,0 +1,29 @@
+---
+source: crates/biome_cli/tests/snap_test.rs
+expression: redactor(content)
+---
+## `biome.json`
+
+```json
+{
+  "html": {
+    "linter": { "enabled": true },
+    "experimentalFullSupportEnabled": true
+  }
+}
+```
+
+## `file.vue`
+
+```vue
+<template>
+  <li :tabindex="1 ** 2">{{ 1 ** 2 }}</li>
+</template>
+
+```
+
+# Emitted Messages
+
+```block
+Checked 1 file in <TIME>. Fixed 1 file.
+```

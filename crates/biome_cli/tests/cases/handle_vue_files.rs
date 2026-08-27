@@ -773,6 +773,95 @@ function FunctionalComponent() {
 }
 
 #[test]
+fn fix_applied_inside_vue_template_expression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        "biome.json".into(),
+        r#"{ "html": { "linter": {"enabled": true}, "experimentalFullSupportEnabled": true } }"#
+            .as_bytes(),
+    );
+
+    let vue_file_path = Utf8Path::new("file.vue");
+    fs.insert(
+        vue_file_path.into(),
+        r#"<template>
+  <li :tabindex="Math.pow(1, 2)">{{ Math.pow(1, 2) }}</li>
+</template>
+"#
+        .as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(
+            [
+                "check",
+                "--write",
+                "--only=useExponentiationOperator",
+                vue_file_path.as_str(),
+            ]
+            .as_slice(),
+        ),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "fix_applied_inside_vue_template_expression",
+        fs,
+        console,
+        result,
+    ));
+}
+
+/// The interpolation's content starts and ends with `"`, so it reads as a
+/// quoted string on its own. It must still be spliced back verbatim instead
+/// of being re-quoted like an attribute value.
+#[test]
+fn fix_inside_interpolation_is_not_requoted() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        "biome.json".into(),
+        r#"{ "html": { "experimentalFullSupportEnabled": true }, "linter": { "rules": { "style": { "useTemplate": "on" } } } }"#.as_bytes(),
+    );
+
+    let vue_file_path = Utf8Path::new("file.vue");
+    fs.insert(
+        vue_file_path.into(),
+        r#"<script setup>
+const b = "x";
+</script>
+<template>
+  <div>{{ "a" + b + "c" }}</div>
+</template>
+"#
+        .as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(["check", "--write", "--unsafe", vue_file_path.as_str()].as_slice()),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "fix_inside_interpolation_is_not_requoted",
+        fs,
+        console,
+        result,
+    ));
+}
+
+#[test]
 fn format_stdin_successfully() {
     let fs = MemoryFileSystem::default();
     let mut console = BufferConsole::default();
@@ -1185,3 +1274,53 @@ import { mdiSquareOutline } from "@mdi/js";
         result,
     ));
 }
+
+/// The embedded formatter rewrites `'bar'` to `"bar"`, which would terminate
+/// the double-quoted directive early. The re-spliced value has to pick a
+/// delimiter that survives it.
+#[test]
+fn fix_inside_directive_requotes_when_needed() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        "biome.json".into(),
+        r#"{ "html": { "formatter": {"enabled": true}, "linter": {"enabled": true}, "experimentalFullSupportEnabled": true } }"#.as_bytes(),
+    );
+
+    let vue_file_path = Utf8Path::new("file.vue");
+    fs.insert(
+        vue_file_path.into(),
+        r#"<template>
+  <div :title="foo('bar') + Math.pow(1, 2)"></div>
+</template>
+"#
+        .as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(
+            [
+                "check",
+                "--write",
+                "--only=style/useExponentiationOperator",
+                vue_file_path.as_str(),
+            ]
+            .as_slice(),
+        ),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "fix_inside_directive_requotes_when_needed",
+        fs,
+        console,
+        result,
+    ));
+}
+
+

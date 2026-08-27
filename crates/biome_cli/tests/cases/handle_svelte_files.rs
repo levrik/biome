@@ -674,3 +674,54 @@ fn format_svelte_ts_generics_files_write() {
         result,
     ));
 }
+
+#[test]
+fn fix_applied_inside_svelte_text_expression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        "biome.json".into(),
+        r#"{ "html": { "linter": {"enabled": true}, "experimentalFullSupportEnabled": true } }"#
+            .as_bytes(),
+    );
+
+    let svelte_file_path = Utf8Path::new("file.svelte");
+    fs.insert(
+        svelte_file_path.into(),
+        r#"<div>{Math.pow(1, 2)}</div>
+"#
+        .as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(
+            [
+                "check",
+                "--write",
+                "--only=useExponentiationOperator",
+                svelte_file_path.as_str(),
+            ]
+            .as_slice(),
+        ),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+
+    assert_file_contents(
+        &fs,
+        svelte_file_path,
+        r#"<div>{1 ** 2}</div>
+"#,
+    );
+
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "fix_applied_inside_svelte_text_expression",
+        fs,
+        console,
+        result,
+    ));
+}

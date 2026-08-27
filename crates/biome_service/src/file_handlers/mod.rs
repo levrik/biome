@@ -992,7 +992,10 @@ pub(crate) struct CodeActionsParams<'a> {
 }
 
 pub(crate) struct UpdateSnippetsNodes {
+    /// Range of the node holding the snippet, which identifies it.
     pub(crate) range: TextRange,
+    /// Range of the snippet's source inside that node's value token.
+    pub(crate) content_range: TextRange,
     pub(crate) new_code: String,
     /// When `true`, `new_code` needs to be re-indented to match the
     /// host's nesting level. When `false`, `new_code` already has the

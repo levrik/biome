@@ -6,7 +6,7 @@ use crate::embed::html::{
 use crate::file_handlers::html::{EmbedParseContext, ParsedEmbed, is_component_element};
 use crate::file_handlers::{DocumentFileSource, ParseEmbedResult, ParseEmbeddedParams};
 use biome_css_parser::{CssModulesKind, parse_css_with_offset_and_cache};
-use biome_css_syntax::{AnyCssRoot, CssFunction, CssLanguage, CssString, TextSize};
+use biome_css_syntax::{AnyCssRoot, CssFunction, CssLanguage, CssString};
 use biome_html_syntax::{
     AnyAstroDirective, AnySvelteBlock, AnySvelteBlockItem, AnySvelteDirective,
     AnySvelteDirectiveInitializerClause, AstroEmbeddedContent, HtmlAttribute,
@@ -747,23 +747,21 @@ fn build_svelte_text_expression_candidate(
 /// Build an `EmbedCandidate::Directive` from a Vue directive initializer clause.
 ///
 /// Vue directives use quoted string values (`@click="handler()"`).
-/// The JS content is the inner text without quotes, offset by +1 for the opening quote.
+/// The JS content is the inner text, excluding the surrounding quotes.
 fn build_vue_directive_candidate(
     initializer: &HtmlAttributeInitializerClause,
     is_event_handler: bool,
 ) -> Option<EmbedCandidate> {
     let value_node = initializer.value().ok()?;
     let html_string = value_node.as_html_string()?;
-    let content_token = html_string.value_token().ok()?;
     let inner_text = html_string.inner_string_text().ok()?;
-    let token_range = content_token.text_trimmed_range();
-    let inner_offset = token_range.start() + TextSize::from(1);
+    let content_range = html_string.inner_string_range().ok()?;
 
     Some(EmbedCandidate::Directive {
         content: EmbedContent {
-            element_range: initializer.range(),
-            content_range: token_range,
-            content_offset: inner_offset,
+            element_range: html_string.range(),
+            content_range,
+            content_offset: content_range.start(),
             text: inner_text,
         },
         is_event_handler,
@@ -808,14 +806,13 @@ fn build_attribute_candidate(
 
     let value = attribute.initializer()?.value().ok()?;
     let html_string = value.as_html_string()?;
-    let value_token = html_string.value_token().ok()?;
     let text = html_string.inner_string_text().ok()?;
-    let content_range = text.source_range(value_token.text_range());
+    let content_range = html_string.inner_string_range().ok()?;
 
     Some(EmbedCandidate::Attribute {
         name,
         content: EmbedContent {
-            element_range: attribute.range(),
+            element_range: html_string.range(),
             content_range,
             content_offset: content_range.start(),
             text,

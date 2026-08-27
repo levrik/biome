@@ -1029,3 +1029,107 @@ fn comment_only_template_expression_formats() {
         result,
     ));
 }
+
+#[test]
+fn fix_applied_inside_astro_attribute_expression() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        "biome.json".into(),
+        r#"{ "html": { "linter": {"enabled": true}, "experimentalFullSupportEnabled": true } }"#
+            .as_bytes(),
+    );
+
+    let astro_file_path = Utf8Path::new("file.astro");
+    fs.insert(
+        astro_file_path.into(),
+        r#"<div data-x={Math.pow(1, 2)}></div>
+"#
+        .as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(
+            [
+                "check",
+                "--write",
+                "--only=useExponentiationOperator",
+                astro_file_path.as_str(),
+            ]
+            .as_slice(),
+        ),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+
+    assert_file_contents(
+        &fs,
+        astro_file_path,
+        r#"<div data-x={1 ** 2}></div>
+"#,
+    );
+
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "fix_applied_inside_astro_attribute_expression",
+        fs,
+        console,
+        result,
+    ));
+}
+
+#[test]
+fn multiline_fix_inside_astro_text_expression_is_reindented() {
+    let fs = MemoryFileSystem::default();
+    let mut console = BufferConsole::default();
+
+    fs.insert(
+        "biome.json".into(),
+        r#"{ "html": { "formatter": {"enabled": true}, "linter": {"enabled": true}, "experimentalFullSupportEnabled": true } }"#
+            .as_bytes(),
+    );
+
+    let astro_file_path = Utf8Path::new("file.astro");
+    fs.insert(
+        astro_file_path.into(),
+        r#"<div>{
+    () => {
+      return Math.pow(1, 2);
+    }
+  }</div>
+"#
+        .as_bytes(),
+    );
+
+    let (fs, result) = run_cli(
+        fs,
+        &mut console,
+        Args::from(
+            [
+                "check",
+                "--write",
+                "--only=useExponentiationOperator",
+                astro_file_path.as_str(),
+            ]
+            .as_slice(),
+        ),
+    );
+
+    assert!(result.is_ok(), "run_cli returned {result:?}");
+
+    // The single-`{}` text expression's leading whitespace is classified as
+    // parser trivia rather than token text (unlike `{{ }}`), which used to
+    // make the naive `text_trimmed()`-based reindent path lose track of the
+    // host's indentation. The re-spliced fix must still line up under
+    // `<span>`, not collapse flush-left.
+    assert_cli_snapshot(SnapshotPayload::new(
+        module_path!(),
+        "multiline_fix_inside_astro_text_expression_is_reindented",
+        fs,
+        console,
+        result,
+    ));
+}
